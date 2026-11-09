@@ -1,0 +1,119 @@
+server:
+  port: 8082
+  shutdown: graceful
+
+spring:
+  application:
+    name: trip-service
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 55MB
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trilo}
+    username: ${DB_USER:trilo}
+    password: ${DB_PASSWORD:trilo}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 블루-그린 롤아웃 중 구/신 컨테이너가 공존하므로 유휴 커넥션을 최소화
+      # (전 서비스 풀 합계가 postgres max_connections를 넘지 않도록 제한)
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: trip
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    schemas:
+      - trip
+    locations: classpath:db/migration
+    table: flyway_schema_history
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.type.mapping: tripDeleted:app.trilo.common.event.TripDeletedEvent,tripUpdated:app.trilo.common.event.TripUpdatedEvent
+    consumer:
+      group-id: trip-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: app.trilo.common.event,app.trilo.trip.event
+        spring.json.type.mapping: userDeleted:app.trilo.common.event.UserDeletedEvent,mediaUploaded:app.trilo.common.event.MediaUploadedEvent
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_JWKS_URL:http://localhost:8081/auth/.well-known/jwks.json}
+
+# MinIO / S3 configuration
+storage:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9002}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:trilo-media}
+  region: ${STORAGE_REGION:us-east-1}
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+# Internal service URLs
+services:
+  auth-service-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+  notification-service-url: ${NOTIFICATION_SERVICE_URL:http://localhost:8086}
+  ai-service-url: ${AI_SERVICE_URL:http://localhost:8088}
+  weather-service-url: ${WEATHER_SERVICE_URL:http://localhost:8091}
+
+# Shared secret for internal push-notification calls (X-Internal-Token)
+notification:
+  internal-token: ${INTERNAL_NOTIFICATION_TOKEN:}
+
+# Shared secret for internal ai-service calls (X-Internal-Token)
+ai:
+  internal-token: ${INTERNAL_AI_TOKEN:}
+
+# Shared secret for internal weather-service calls (X-Internal-Token)
+weather:
+  internal-token: ${INTERNAL_WEATHER_TOKEN:}
+
+# Public web base for the trip track view; push deep links are built as {base}/{nickname}/{tripId}
+web:
+  track-link-base: ${WEB_TRACK_LINK_BASE:https://example.com/track}
+
+logging:
+  level:
+    app.trilo: DEBUG
+    org.springframework.security: DEBUG

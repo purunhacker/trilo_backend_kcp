@@ -1,0 +1,574 @@
+openapi: 3.0.3
+info:
+  title: Trilo API
+  version: 0.1.0
+  description: |
+    Trilo 백엔드 REST API 명세. FE는 `/api/*` 로 호출합니다.
+    자세한 설명은 02_API_SPEC.md, 도메인 모델은 01_DOMAIN_MODEL.md 참조.
+
+servers:
+  - url: /api
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: INVALID_CREDENTIALS }
+        message: { type: string, example: "비밀번호가 일치하지 않습니다." }
+        fields:
+          type: object
+          additionalProperties: { type: string }
+
+    UserPrefs:
+      type: object
+      properties:
+        unit: { type: string, enum: [km, mi], default: km }
+        mapStyle: { type: string, enum: [voyager, satellite, terrain], default: voyager }
+        language: { type: string, enum: [ko, en], default: ko }
+        theme: { type: string, enum: [light, dark, system], default: light }
+        notifyNewTrip: { type: boolean, default: true }
+        notifyWeekly: { type: boolean, default: false }
+        notifyMarketing: { type: boolean, default: false }
+
+    User:
+      type: object
+      required: [id, email, nickname, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        nickname: { type: string }
+        avatar: { type: string, nullable: true, description: "URL or null" }
+        bio: { type: string, default: "" }
+        createdAt: { type: string, format: date }
+        linkedSocial:
+          type: array
+          items: { type: string, enum: [google, apple, kakao, naver] }
+        prefs: { $ref: '#/components/schemas/UserPrefs' }
+
+    AuthResult:
+      type: object
+      required: [user, accessToken]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        accessToken: { type: string }
+        refreshToken: { type: string, description: "본문에 안 실을 수도 있음 (httpOnly cookie)" }
+        isNew: { type: boolean, description: "소셜 로그인 신규 가입일 때 true" }
+
+    Coord:
+      type: array
+      minItems: 2
+      maxItems: 2
+      items: { type: number }
+      example: [37.6585, 127.0112]
+
+    TimelineItem:
+      type: object
+      required: [id, kind, time, coord, title]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [photo, video, note] }
+        time: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', example: "07:12" }
+        coord: { $ref: '#/components/schemas/Coord' }
+        title: { type: string }
+        caption: { type: string }
+        body: { type: string }
+        photo: { type: string, nullable: true }
+        video: { type: string, nullable: true }
+        poster: { type: string, nullable: true }
+        hidden: { type: boolean, default: false }
+
+    Trip:
+      type: object
+      required: [id, title, date, track, timeline]
+      properties:
+        id: { type: string, example: "bukhansan-2025-04-12" }
+        title: { type: string }
+        subtitle: { type: string }
+        date: { type: string, format: date }
+        weather: { type: string }
+        distance: { type: string, example: "9.8 km" }
+        elevation: { type: string, example: "↑ 742 m" }
+        duration: { type: string, example: "5시간 42분" }
+        companions:
+          type: array
+          items: { type: string }
+        hidden: { type: boolean, default: false }
+        track:
+          type: array
+          items: { $ref: '#/components/schemas/Coord' }
+        timeline:
+          type: array
+          items: { $ref: '#/components/schemas/TimelineItem' }
+
+    TripSummary:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        subtitle: { type: string }
+        date: { type: string, format: date }
+        weather: { type: string }
+        distance: { type: string }
+        elevation: { type: string }
+        duration: { type: string }
+        companions:
+          type: array
+          items: { type: string }
+        hidden: { type: boolean }
+        thumbnail: { type: string, nullable: true }
+
+    MediaUploadResult:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string }
+        posterUrl: { type: string, nullable: true }
+        width: { type: integer }
+        height: { type: integer }
+        exif:
+          type: object
+          properties:
+            takenAt: { type: string, format: date-time }
+            lat: { type: number }
+            lng: { type: number }
+
+    GalleryItem:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [photo, video] }
+        url: { type: string }
+        thumbnail: { type: string }
+        tripId: { type: string }
+        tripTitle: { type: string }
+        itemId: { type: string }
+        title: { type: string }
+        caption: { type: string }
+        takenAt: { type: string, format: date-time }
+        coord: { $ref: '#/components/schemas/Coord' }
+
+    GpxResult:
+      type: object
+      properties:
+        track:
+          type: array
+          items: { $ref: '#/components/schemas/Coord' }
+        stats:
+          type: object
+          properties:
+            distance: { type: string }
+            elevation: { type: string }
+            duration: { type: string }
+            startedAt: { type: string, format: date-time }
+            endedAt: { type: string, format: date-time }
+
+paths:
+  /auth/signup:
+    post:
+      tags: [auth]
+      security: []
+      summary: 회원가입
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, nickname, agreedTerms]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                nickname: { type: string, minLength: 2, maxLength: 20 }
+                avatar: { type: string, nullable: true }
+                agreedTerms: { type: boolean }
+                agreedMarketing: { type: boolean }
+      responses:
+        '200':
+          description: 가입 성공
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '409': { description: 이메일 중복, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: 로그인
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResult' } } } }
+        '401': { description: 인증 실패, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/social/{provider}:
+    post:
+      tags: [auth]
+      security: []
+      summary: 소셜 로그인
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema: { type: string, enum: [google, apple, kakao, naver] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idToken: { type: string }
+                accessToken: { type: string }
+                code: { type: string }
+                codeVerifier: { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResult' } } } }
+
+  /auth/social/{provider}/unlink:
+    post:
+      tags: [auth]
+      summary: 소셜 계정 해제
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema: { type: string, enum: [google, apple, kakao, naver] }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { user: { $ref: '#/components/schemas/User' } } } } } }
+        '422': { description: 마지막 인증 수단, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: 로그아웃
+      responses:
+        '204': { description: OK }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      security: []
+      summary: 토큰 갱신
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: { type: string }
+
+  /auth/password/reset-request:
+    post:
+      tags: [auth]
+      security: []
+      summary: 비밀번호 재설정 메일 요청
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: 항상 200 (사용자 열거 방지)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sentTo: { type: string }
+
+  /auth/password/reset:
+    post:
+      tags: [auth]
+      security: []
+      summary: 토큰으로 비밀번호 재설정
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, token, newPassword]
+              properties:
+                email: { type: string, format: email }
+                token: { type: string }
+                newPassword: { type: string, minLength: 8 }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { user: { $ref: '#/components/schemas/User' } } } } } }
+        '400': { description: 토큰 무효, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: 내 정보
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { user: { $ref: '#/components/schemas/User' } } } } } }
+    patch:
+      tags: [auth]
+      summary: 프로필 수정
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname: { type: string }
+                avatar: { type: string, nullable: true }
+                bio: { type: string }
+                email: { type: string, format: email }
+                prefs: { $ref: '#/components/schemas/UserPrefs' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { user: { $ref: '#/components/schemas/User' } } } } } }
+    delete:
+      tags: [auth]
+      summary: 계정 삭제
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string }
+      responses:
+        '204': { description: OK }
+
+  /auth/password:
+    post:
+      tags: [auth]
+      summary: 비밀번호 변경
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword: { type: string, minLength: 8 }
+      responses:
+        '204': { description: OK }
+        '401': { description: 현재 비번 불일치, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/me/export:
+    get:
+      tags: [auth]
+      summary: 내 데이터 내보내기
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trips:
+                    type: array
+                    items: { $ref: '#/components/schemas/Trip' }
+                  exportedAt: { type: string, format: date-time }
+
+  /trips:
+    get:
+      tags: [trips]
+      summary: 내 트립 목록
+      parameters:
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: cursor, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 20, maximum: 50 } }
+        - { in: query, name: includeHidden, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/TripSummary' }
+                  nextCursor: { type: string, nullable: true }
+    post:
+      tags: [trips]
+      summary: 트립 생성
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Trip' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Trip' } } } }
+
+  /trips/{id}:
+    get:
+      tags: [trips]
+      summary: 트립 상세
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Trip' } } } }
+        '404': { description: Not found }
+    patch:
+      tags: [trips]
+      summary: 트립 수정
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                subtitle: { type: string }
+                weather: { type: string }
+                distance: { type: string }
+                elevation: { type: string }
+                duration: { type: string }
+                companions: { type: array, items: { type: string } }
+                hidden: { type: boolean }
+                track: { type: array, items: { $ref: '#/components/schemas/Coord' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Trip' } } } }
+    delete:
+      tags: [trips]
+      summary: 트립 삭제
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '204': { description: OK }
+
+  /trips/{id}/items:
+    post:
+      tags: [items]
+      summary: 타임라인 아이템 생성
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/TimelineItem'
+                - type: object
+                  properties:
+                    index: { type: integer }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/TimelineItem' } } } }
+
+  /trips/{id}/items/{itemId}:
+    patch:
+      tags: [items]
+      summary: 아이템 수정
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+        - { in: path, name: itemId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TimelineItem' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TimelineItem' } } } }
+    delete:
+      tags: [items]
+      summary: 아이템 삭제
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+        - { in: path, name: itemId, required: true, schema: { type: string } }
+      responses:
+        '204': { description: OK }
+
+  /trips/{id}/media:
+    post:
+      tags: [media]
+      summary: 미디어 업로드
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+                itemId: { type: string }
+      responses:
+        '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MediaUploadResult' } } } }
+        '413': { description: Too large }
+        '415': { description: Unsupported }
+
+  /trips/{id}/gpx:
+    post:
+      tags: [media]
+      summary: GPX 업로드
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GpxResult' } } } }
+        '422': { description: 잘못된 GPX }
+
+  /gallery:
+    get:
+      tags: [gallery]
+      summary: 미디어 갤러리
+      parameters:
+        - { in: query, name: cursor, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 24, maximum: 60 } }
+        - { in: query, name: kind, schema: { type: string, enum: [photo, video] } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: tripId, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/GalleryItem' }
+                  nextCursor: { type: string, nullable: true }

@@ -1,0 +1,53 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Environment
+.env
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test containers
+.testcontainers.properties
+
+# Temporary files
+tmp/
+temp/
+
+# Monitoring (Grafana Cloud)
+.env.monitoring
+.env.monitoring.*
+!.env.monitoring.example
+monitoring/otel/*.jar
+
+# Local assistants, credentials and exported user data
+.claude/
+.codex/
+.agents/
+.env.*
+!.env.example
+*.p8
+*.p12
+*.pfx
+*.key
+*.jks
+*.keystore
+*.dump
+*.sql.gz
+*.gpx
+exports/

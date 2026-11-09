@@ -1,0 +1,146 @@
+server:
+  port: 8081
+  shutdown: graceful
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: auth-service
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 12MB
+
+  mvc:
+    async:
+      # StreamingResponseBody(내보내기 zip 다운로드)가 컨테이너 기본 30초 async 타임아웃에
+      # 끊기지 않도록 확대 (대용량 zip 스트리밍용, 기본 30분)
+      request-timeout: ${MVC_ASYNC_TIMEOUT_MS:1800000}
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trilo}?currentSchema=auth,public
+    username: ${DB_USER:trilo}
+    password: ${DB_PASSWORD:trilo}
+    hikari:
+      schema: auth
+      # 블루-그린 롤아웃 중 구/신 컨테이너가 공존하므로 유휴 커넥션을 최소화
+      # (전 서비스 풀 합계가 postgres max_connections를 넘지 않도록 제한)
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: auth
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    schemas: auth
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+jwt:
+  private-key: ${JWT_PRIVATE_KEY:}
+  public-key: ${JWT_PUBLIC_KEY:}
+  issuer: trilo-api
+  access-ttl-seconds: 900
+  refresh-ttl-days: 30
+  key-id: trilo-key-1
+
+google:
+  client-id: ${GOOGLE_CLIENT_ID:}
+  client-secret: ${GOOGLE_CLIENT_SECRET:}   # Required for token exchange and revocation
+
+apple:
+  client-id: ${APPLE_CLIENT_ID:}           # iOS Bundle ID (e.g., com.example.trilo)
+  client-id-web: ${APPLE_CLIENT_ID_WEB:}   # Services ID for web (e.g., im.trilo.web)
+  team-id: ${APPLE_TEAM_ID:}               # Apple Developer Team ID (10-char, e.g., ABCD1234EF)
+  key-id: ${APPLE_KEY_ID:}                 # Key ID for Sign in with Apple (10-char)
+  private-key: ${APPLE_PRIVATE_KEY:}       # P8 private key content (base64 or PEM format)
+
+app:
+  cookie:
+    secure: ${COOKIE_SECURE:false}
+    domain: ${COOKIE_DOMAIN:localhost}
+
+spring.kafka:
+  bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  producer:
+    key-serializer: org.apache.kafka.common.serialization.StringSerializer
+    value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    properties:
+      spring.json.type.mapping: userDeleted:app.trilo.common.event.UserDeletedEvent
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+# MinIO / S3 configuration for avatars
+storage:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9002}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:trilo-media}
+  public-base-url: ${STORAGE_PUBLIC_BASE:http://localhost:9002/trilo-media}
+  region: ${STORAGE_REGION:us-east-1}
+  # presigned URL용 외부(브라우저 접근 가능) 엔드포인트 — 미설정 시 endpoint 사용
+  presign-endpoint: ${STORAGE_PRESIGN_ENDPOINT:}
+
+# Avatar settings
+avatar:
+  max-size: 10485760  # 10MB
+  allowed-types: image/jpeg,image/png,image/webp,image/heic
+  output-size: 400
+  output-quality: 0.85
+
+# Internal service URLs (for data export aggregation + mail delivery via OpenFeign)
+services:
+  trip-service-url: ${TRIP_SERVICE_URL:http://localhost:8082}
+  media-service-url: ${MEDIA_SERVICE_URL:http://localhost:8083}
+  mail-service-url: ${MAIL_SERVICE_URL:http://localhost:8087}
+
+# Shared secret for calling mail-service internal send endpoint (X-Internal-Token)
+mail:
+  internal-token: ${INTERNAL_MAIL_TOKEN:}
+
+# Email verification: base URL the signup verification link points to (token appended as ?token=).
+# Defaults to the public gateway endpoint so it works without any front-end page.
+auth:
+  email-verify:
+    link-base: ${EMAIL_VERIFY_LINK_BASE:http://localhost:8080/api/auth/verify-email}
+    # Front-end result page the verify-email endpoint redirects to after verifying the token.
+    # status=success|failed is appended as a query param.
+    result-base: ${EMAIL_VERIFY_RESULT_BASE:http://localhost:5500/verifyemail}
+
+# Data export settings
+export:
+  retention-days: ${EXPORT_RETENTION_DAYS:7}    # zip 보관 기간 (이후 자동 삭제)
+  batch-size: ${EXPORT_BATCH_SIZE:3}            # 폴러가 한 번에 처리할 작업 수
+  stale-processing-minutes: ${EXPORT_STALE_MINUTES:30}  # PROCESSING 멈춤 재시도 기준
+  # 브라우저 네이티브 다운로드용 토큰 URL의 베이스 (공개 게이트웨이 경로)
+  download-link-base: ${EXPORT_DOWNLOAD_LINK_BASE:http://localhost:8080/api/auth/me/export}
+  download-token-ttl-minutes: ${EXPORT_DOWNLOAD_TOKEN_TTL_MINUTES:10}
+  # download-url 응답 방식: presigned(스토리지에서 직접 다운로드, 외부 접근 가능 엔드포인트 필요)
+  # / proxy(백엔드 스트리밍 토큰 URL)
+  download-mode: ${EXPORT_DOWNLOAD_MODE:proxy}

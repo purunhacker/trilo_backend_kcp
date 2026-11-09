@@ -1,0 +1,29 @@
+spring:
+  datasource:
+    hikari:
+      schema: auth
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: auth
+
+  flyway:
+    enabled: true
+    schemas: auth
+    baseline-on-migrate: true
+
+jwt:
+  private-key:
+  public-key:
+  issuer: trilo-api
+  access-ttl-seconds: 900
+  refresh-ttl-days: 30
+  key-id: test-key
+
+app:
+  cookie:
+    secure: false
+    domain: localhost

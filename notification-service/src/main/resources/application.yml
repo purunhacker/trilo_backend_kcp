@@ -1,0 +1,108 @@
+server:
+  port: 8086
+  shutdown: graceful
+
+spring:
+  application:
+    name: notification-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trilo}?currentSchema=notification
+    username: ${DB_USER:trilo}
+    password: ${DB_PASSWORD:trilo}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 블루-그린 롤아웃 중 구/신 컨테이너가 공존하므로 유휴 커넥션을 최소화
+      # (전 서비스 풀 합계가 postgres max_connections를 넘지 않도록 제한)
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: notification
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    schemas:
+      - notification
+    locations: classpath:db/migration
+    table: flyway_schema_history
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: app.trilo.common.event
+        spring.json.type.mapping: userDeleted:app.trilo.common.event.UserDeletedEvent
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_JWKS_URL:http://localhost:8081/auth/.well-known/jwks.json}
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+# Notification behaviour
+notification:
+  # Shared secret required on internal send endpoints (X-Internal-Token header).
+  # Only containers that know this token may send pushes.
+  internal-token: ${INTERNAL_NOTIFICATION_TOKEN:}
+  # Quiet hours window (Asia/Seoul). Users who disallow night push get deferred to morning-send-hour.
+  timezone: ${NOTIFICATION_TIMEZONE:Asia/Seoul}
+  quiet-start-hour: ${NOTIFICATION_QUIET_START:21}
+  quiet-end-hour: ${NOTIFICATION_QUIET_END:8}
+  morning-send-hour: ${NOTIFICATION_MORNING_HOUR:8}
+  # Default night-push preference for users with no explicit setting.
+  default-allow-night-push: ${NOTIFICATION_DEFAULT_ALLOW_NIGHT:false}
+  # Deferred queue poller / cleanup
+  poll-interval-ms: ${NOTIFICATION_POLL_INTERVAL_MS:60000}
+  cleanup-cron: ${NOTIFICATION_CLEANUP_CRON:0 30 4 * * ?}
+  deferred-retention-days: ${NOTIFICATION_DEFERRED_RETENTION_DAYS:7}
+
+# Push providers (empty credentials -> dry-run/log mode for local/dev)
+push:
+  fcm:
+    # Path to a Firebase service-account JSON file, or inline JSON content.
+    credentials: ${FCM_CREDENTIALS:}
+  apns:
+    # APNs token-based auth (.p8) - leave empty to disable real sending.
+    auth-key: ${APNS_AUTH_KEY:}
+    key-id: ${APNS_KEY_ID:}
+    team-id: ${APNS_TEAM_ID:}
+    bundle-id: ${APNS_BUNDLE_ID:}
+    production: ${APNS_PRODUCTION:false}
+
+services:
+  auth-service-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+
+logging:
+  level:
+    app.trilo: INFO

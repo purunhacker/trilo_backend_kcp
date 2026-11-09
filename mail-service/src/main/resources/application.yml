@@ -1,0 +1,76 @@
+server:
+  port: 8087
+  shutdown: graceful
+
+spring:
+  application:
+    name: mail-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trilo}?currentSchema=mail
+    username: ${DB_USER:trilo}
+    password: ${DB_PASSWORD:trilo}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 블루-그린 롤아웃 중 구/신 컨테이너가 공존하므로 유휴 커넥션을 최소화
+      # (전 서비스 풀 합계가 postgres max_connections를 넘지 않도록 제한)
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: mail
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    schemas:
+      - mail
+    locations: classpath:db/migration
+    table: flyway_schema_history
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+# Mail behaviour
+mail:
+  # Shared secret required on internal send endpoints (X-Internal-Token header).
+  # Only containers that know this token may send emails.
+  internal-token: ${INTERNAL_MAIL_TOKEN:}
+  # Default From address/name applied to every outgoing email.
+  from: ${MAIL_FROM:no-reply@example.com}
+  from-name: ${MAIL_FROM_NAME:Trilo}
+  # Provider: "ses" for real delivery via AWS SES, anything else (e.g. "log") => dry-run/log mode.
+  provider: ${MAIL_PROVIDER:log}
+  ses:
+    region: ${AWS_SES_REGION:${AWS_REGION:ap-northeast-2}}
+    # Explicit static credentials (optional). Leave empty to use the default AWS credential chain
+    # (e.g. an EC2 instance role).
+    access-key: ${AWS_SES_ACCESS_KEY:${AWS_ACCESS_KEY_ID:}}
+    secret-key: ${AWS_SES_SECRET_KEY:${AWS_SECRET_ACCESS_KEY:}}
+    # Optional SES configuration set (for dedicated IP pools / event publishing).
+    configuration-set: ${AWS_SES_CONFIG_SET:}
+
+logging:
+  level:
+    app.trilo: INFO

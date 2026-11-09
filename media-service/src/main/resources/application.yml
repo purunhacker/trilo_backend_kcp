@@ -1,0 +1,112 @@
+server:
+  port: 8083
+  shutdown: graceful
+
+spring:
+  application:
+    name: media-service
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 200MB
+      max-request-size: 210MB
+      file-size-threshold: 2KB
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trilo}
+    username: ${DB_USER:trilo}
+    password: ${DB_PASSWORD:trilo}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 블루-그린 롤아웃 중 구/신 컨테이너가 공존하므로 유휴 커넥션을 최소화
+      # (전 서비스 풀 합계가 postgres max_connections를 넘지 않도록 제한)
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: media
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    schemas:
+      - media
+    locations: classpath:db/migration
+    table: flyway_schema_history
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: media-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: app.trilo.common.event
+        spring.json.type.mapping: userDeleted:app.trilo.common.event.UserDeletedEvent,tripDeleted:app.trilo.common.event.TripDeletedEvent
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_JWKS_URL:http://localhost:8081/auth/.well-known/jwks.json}
+
+# MinIO / S3 configuration
+storage:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9002}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:trilo-media}
+  public-base-url: ${STORAGE_PUBLIC_BASE:http://localhost:9002/trilo-media}
+  region: ${STORAGE_REGION:us-east-1}
+
+# Service URLs
+services:
+  trip-service-url: ${TRIP_SERVICE_URL:http://localhost:8082}
+
+# File limits
+media:
+  max-photo-size: 20971520  # 20MB
+  max-video-size: 209715200 # 200MB
+  allowed-photo-types: image/jpeg,image/png,image/heic,image/heif,image/webp
+  allowed-video-types: video/mp4,video/quicktime,video/webm
+  thumbnail-size: 480
+  full-size: 1920
+  thumbnail-quality: 0.78
+  full-quality: 0.85
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+logging:
+  level:
+    app.trilo: DEBUG
+    software.amazon.awssdk: INFO

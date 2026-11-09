@@ -1,0 +1,93 @@
+server:
+  port: 8088
+  shutdown: graceful
+
+spring:
+  application:
+    name: ai-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trilo}?currentSchema=ai
+    username: ${DB_USER:trilo}
+    password: ${DB_PASSWORD:trilo}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 블루-그린 롤아웃 중 구/신 컨테이너가 공존하므로 유휴 커넥션을 최소화
+      # (전 서비스 풀 합계가 postgres max_connections를 넘지 않도록 제한)
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: ai
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    schemas:
+      - ai
+    locations: classpath:db/migration
+    table: flyway_schema_history
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_JWKS_URL:http://localhost:8081/auth/.well-known/jwks.json}
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+# AI analysis behaviour
+ai:
+  # Shared secret required on internal endpoints (X-Internal-Token header).
+  internal-token: ${INTERNAL_AI_TOKEN:}
+  # Sequential analysis queue poller.
+  poll-interval-ms: ${AI_POLL_INTERVAL_MS:30000}
+  # How many candidates to pull from trip-service per sync call.
+  sync-batch-size: ${AI_SYNC_BATCH_SIZE:100}
+  # How many pending analyses to process per scheduler run (each is sequential).
+  max-per-run: ${AI_MAX_PER_RUN:5}
+  # Analyses that failed this many times go FAILED (until revived).
+  max-attempts: ${AI_MAX_ATTEMPTS:3}
+  # Daily cron that revives FAILED analyses back to PENDING. Containers run on UTC (Dockerfile
+  # pins TZ=UTC), so this fires at 05:00 UTC.
+  failed-retry-cron: ${AI_FAILED_RETRY_CRON:0 0 5 * * ?}
+  # Each analysis is auto-revived at most this many times; manual admin triggers reset the count.
+  max-revivals: ${AI_MAX_REVIVALS:3}
+  # Track points are downsampled to at most this many before being sent to OpenAI.
+  max-points: ${AI_MAX_POINTS:200}
+  openai:
+    # Empty api-key -> dry-run mode: analyses stay PENDING and calls are only logged.
+    api-key: ${OPENAI_API_KEY:}
+    model: ${OPENAI_MODEL:gpt-5-nano}
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+    # gpt-5 reasoning effort (minimal/low/medium/high) - higher improves region accuracy.
+    reasoning-effort: ${OPENAI_REASONING_EFFORT:high}
+
+services:
+  trip-service-url: ${TRIP_SERVICE_URL:http://localhost:8082}
+
+logging:
+  level:
+    app.trilo: INFO

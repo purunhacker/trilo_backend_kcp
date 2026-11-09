@@ -1,0 +1,124 @@
+server:
+  port: 8085
+  shutdown: graceful
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: admin-service
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 12MB
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trilo}?currentSchema=admin,auth,trip,media,public
+    username: ${DB_USER:trilo}
+    password: ${DB_PASSWORD:trilo}
+    hikari:
+      schema: admin
+      # 블루-그린 롤아웃 중 구/신 컨테이너가 공존하므로 유휴 커넥션을 최소화
+      # (전 서비스 풀 합계가 postgres max_connections를 넘지 않도록 제한)
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: admin
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    schemas: admin
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+admin:
+  jwt:
+    secret: ${ADMIN_JWT_SECRET}
+    issuer: trilo-admin
+    access-ttl-seconds: 3600
+    refresh-ttl-days: 7
+  default-username: ${ADMIN_BOOTSTRAP_USERNAME:}
+  default-password: ${ADMIN_BOOTSTRAP_PASSWORD:}
+
+spring.kafka:
+  bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  producer:
+    key-serializer: org.apache.kafka.common.serialization.StringSerializer
+    value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    properties:
+      spring.json.type.mapping: userDeleted:app.trilo.common.event.UserDeletedEvent
+
+# Internal service URLs
+internal:
+  auth-service-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+  trip-service-url: ${TRIP_SERVICE_URL:http://localhost:8082}
+  media-service-url: ${MEDIA_SERVICE_URL:http://localhost:8083}
+
+# Feign client URL (used by common-lib NotificationInternalClient / AiInternalClient)
+services:
+  notification-service-url: ${NOTIFICATION_SERVICE_URL:http://localhost:8086}
+  ai-service-url: ${AI_SERVICE_URL:http://localhost:8088}
+  weather-service-url: ${WEATHER_SERVICE_URL:http://localhost:8091}
+
+# Shared secret attached to internal push-send calls
+notification:
+  internal-token: ${INTERNAL_NOTIFICATION_TOKEN:}
+
+# Shared secret attached to internal ai-service calls
+ai:
+  internal-token: ${INTERNAL_AI_TOKEN:}
+
+# Shared secret attached to internal weather-service calls
+weather:
+  internal-token: ${INTERNAL_WEATHER_TOKEN:}
+
+# Shared-bucket storage (notice popup image uploads)
+storage:
+  endpoint: ${STORAGE_ENDPOINT:http://localhost:9002}
+  access-key: ${STORAGE_ACCESS_KEY:minioadmin}
+  secret-key: ${STORAGE_SECRET_KEY:minioadmin}
+  bucket: ${STORAGE_BUCKET:trilo-media}
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL:http://localhost:9002/trilo-media}
+  region: ${STORAGE_REGION:ap-northeast-2}
+
+# Social token revocation settings (for permanent member deletion)
+google:
+  client-id: ${GOOGLE_CLIENT_ID:}
+  client-secret: ${GOOGLE_CLIENT_SECRET:}
+
+apple:
+  client-id-web: ${APPLE_CLIENT_ID_WEB:}
+  team-id: ${APPLE_TEAM_ID:}
+  key-id: ${APPLE_KEY_ID:}
+  private-key: ${APPLE_PRIVATE_KEY:}
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+logging:
+  level:
+    app.trilo.admin: DEBUG

@@ -1,0 +1,301 @@
+server:
+  port: 8080
+  # 무중단 배포: SIGTERM 시 신규 요청 차단 + 처리 중 요청 드레인 후 종료
+  shutdown: graceful
+
+spring:
+  application:
+    name: gateway
+
+  codec:
+    max-in-memory-size: 200MB
+
+  webflux:
+    static-path-pattern: /static/**
+
+  cloud:
+    gateway:
+      routes:
+        # Auth service routes - public endpoints
+        - id: auth-public
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            # 주의: 여기 열거한 경로에는 JwtAuth 필터가 없으므로 반드시 '진짜 공개' 경로만 둘 것.
+            # /api/auth/password/** (POST /password 비밀번호 변경 포함) 나 /api/auth/social/**
+            # (.../unlink 포함) 처럼 넓은 와일드카드를 쓰면 인증이 필요한 엔드포인트까지 무인증으로 통과한다.
+            - Path=/api/auth/signup, /api/auth/login, /api/auth/refresh, /api/auth/password/reset-request, /api/auth/password/reset, /api/auth/password/find, /api/auth/verify-email, /api/auth/social/{provider}, /api/auth/.well-known/jwks.json
+          filters:
+            - StripPrefix=1
+
+        # Terms public endpoints (no auth required)
+        - id: terms-public
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/terms, /api/terms/active, /api/terms/active/**, /api/terms/versions/**
+          filters:
+            - StripPrefix=1
+
+        # Terms protected endpoints (auth required for my-consents, consents)
+        - id: terms-protected
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/terms/my-consents, /api/terms/consents
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Data export zip download - no JwtAuth so the browser can download natively
+        # (plain navigation). auth-service validates the short-lived ?token= itself,
+        # and Authorization-header calls still work (auth-service parses the bearer token).
+        - id: auth-export-download
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/auth/me/export/*/download
+          filters:
+            - StripPrefix=1
+
+        # Auth service routes - protected endpoints
+        - id: auth-protected
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Block internal endpoints (service-to-service only) - MUST be before other routes
+        - id: internal-block
+          uri: no://op
+          predicates:
+            - Path=/api/media/internal/**, /api/trips/internal/**, /api/internal/**, /api/notifications/internal/**, /api/mail/internal/**, /api/ai/internal/**, /api/weather/internal/**
+          filters:
+            - SetStatus=404
+
+        # Search API routes - public endpoints (no auth required)
+        - id: search-users
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/search/users
+          filters:
+            - StripPrefix=1
+
+        - id: search-trips
+          uri: ${TRIP_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/search/trips
+          filters:
+            - StripPrefix=1
+
+        # Follow API routes (Auth Service)
+        - id: follows
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/follows/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Block API routes (Auth Service)
+        - id: blocks
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/blocks/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Feed API routes (Trip Service)
+        - id: feed
+          uri: ${TRIP_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/feed/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Likes API routes (Trip Service)
+        - id: likes
+          uri: ${TRIP_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/likes/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Device registration routes (Notification Service)
+        - id: devices
+          uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8086}
+          predicates:
+            - Path=/api/devices/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Notification preference routes (Notification Service)
+        - id: notifications
+          uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8086}
+          predicates:
+            - Path=/api/notifications/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # AI analysis routes (AI Service) - view/edit trip GPX analysis
+        - id: ai
+          uri: ${AI_SERVICE_URL:http://localhost:8088}
+          predicates:
+            - Path=/api/ai/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Weather routes (Weather Service) - live conditions + recorded route weather
+        - id: weather
+          uri: ${WEATHER_SERVICE_URL:http://localhost:8091}
+          predicates:
+            - Path=/api/weather/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Notice routes (Notice Service) - public, auth optional.
+        # No JwtAuth filter: the Authorization header passes through and notice-service
+        # validates it itself, so guests and members both get matching notices.
+        - id: notices
+          uri: ${NOTICE_SERVICE_URL:http://localhost:8089}
+          predicates:
+            - Path=/api/notices/**
+          filters:
+            - StripPrefix=1
+
+        # Feedback routes (Feedback Service) - member-only submissions
+        - id: feedback
+          uri: ${FEEDBACK_SERVICE_URL:http://localhost:8090}
+          predicates:
+            - Path=/api/feedback/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Report routes (Report Service) - member-only content reports
+        - id: reports
+          uri: ${REPORT_SERVICE_URL:http://localhost:8092}
+          predicates:
+            - Path=/api/reports/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Media upload route (to media-service) - specific route before general trips route
+        - id: media-upload
+          uri: ${MEDIA_SERVICE_URL:http://localhost:8083}
+          predicates:
+            - Path=/api/trips/{tripId}/media
+            - Method=POST
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Public user profile routes (no auth required)
+        - id: public-users
+          uri: ${TRIP_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/users/*/trips, /api/users/*/trips/**
+          filters:
+            - StripPrefix=1
+
+        # Trip service routes
+        - id: trips
+          uri: ${TRIP_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/trips/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Gallery service routes (will be added later)
+        - id: gallery
+          uri: ${GALLERY_SERVICE_URL:http://localhost:8084}
+          predicates:
+            - Path=/api/gallery/**
+          filters:
+            - StripPrefix=1
+            - JwtAuth
+
+        # Admin service routes - public endpoints (login, refresh)
+        - id: admin-public
+          uri: ${ADMIN_SERVICE_URL:http://localhost:8085}
+          predicates:
+            - Path=/api/admin/auth/login, /api/admin/auth/refresh
+          filters:
+            - StripPrefix=1
+
+        # Admin service routes - protected endpoints
+        - id: admin-protected
+          uri: ${ADMIN_SERVICE_URL:http://localhost:8085}
+          predicates:
+            - Path=/api/admin/**
+          filters:
+            - StripPrefix=1
+
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST
+        # 무중단 롤아웃: 컨테이너 교체 순간의 연결 거부(ConnectException)만 재시도.
+        # 연결 자체가 실패한 요청은 백엔드에 도달하지 않았으므로 모든 메서드 재시도가 안전(중복 실행 없음).
+        # series=INFORMATIONAL은 상태코드(5xx) 기반 재시도를 비활성화하기 위한 no-op 값
+        # (1xx 최종 응답은 존재하지 않음 — 빈 리스트는 기본값 SERVER_ERROR를 덮어쓰지 못할 수 있어 명시값 사용)
+        - name: Retry
+          args:
+            retries: 5
+            methods: GET,POST,PUT,PATCH,DELETE
+            series: INFORMATIONAL
+            exceptions:
+              - java.net.ConnectException
+            backoff:
+              firstBackoff: 300ms
+              maxBackoff: 3000ms
+              factor: 2
+              basedOnPreviousValue: false
+
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
+
+jwt:
+  jwks-url: ${AUTH_JWKS_URL:http://localhost:8081/auth/.well-known/jwks.json}
+  issuer: trilo-api
+  cache-ttl-minutes: 5
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    app.trilo.gateway: DEBUG

@@ -1,0 +1,8 @@
+allprojects {
+    tasks.withType(Test).configureEach {
+        exclude '**/AuthApplicationTests.class'
+        exclude '**/AuthIntegrationTest.class'
+        exclude '**/RefreshTokenRotationTest.class'
+        exclude '**/TripServiceIntegrationTest.class'
+    }
+}

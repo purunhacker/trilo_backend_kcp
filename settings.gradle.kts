@@ -1,0 +1,16 @@
+rootProject.name = "trilo_backend_kcp"
+
+include("common-lib")
+include("gateway")
+include("auth-service")
+include("trip-service")
+include("media-service")
+include("gallery-service")
+include("admin-service")
+include("notification-service")
+include("mail-service")
+include("ai-service")
+include("notice-service")
+include("feedback-service")
+include("weather-service")
+include("report-service")

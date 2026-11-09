@@ -1,0 +1,106 @@
+server:
+  port: 8091
+  shutdown: graceful
+
+spring:
+  application:
+    name: weather-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trilo}?currentSchema=weather
+    username: ${DB_USER:trilo}
+    password: ${DB_PASSWORD:trilo}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 블루-그린 롤아웃 중 구/신 컨테이너가 공존하므로 유휴 커넥션을 최소화
+      # (전 서비스 풀 합계가 postgres max_connections를 넘지 않도록 제한)
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: weather
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    schemas:
+      - weather
+    locations: classpath:db/migration
+    table: flyway_schema_history
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_JWKS_URL:http://localhost:8081/auth/.well-known/jwks.json}
+
+management:
+  metrics:
+    distribution:
+      # 요청 응답시간 p95/p99 (Micrometer 클라이언트 사이드 percentile).
+      # 히스토그램 버킷(le=...)은 series 가 급증하므로 사용하지 않는다.
+      percentiles:
+        http.server.requests: 0.95,0.99
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: 1.0
+
+weather:
+  # Shared secret required on internal endpoints (X-Internal-Token).
+  internal-token: ${INTERNAL_WEATHER_TOKEN:}
+  # Route weather collection queue poller.
+  poll-interval-ms: ${WEATHER_POLL_INTERVAL_MS:60000}
+  # How many GPX candidates to pull from trip-service per sync call.
+  sync-batch-size: ${WEATHER_SYNC_BATCH_SIZE:100}
+  # How many pending trips to collect per scheduler run.
+  max-per-run: ${WEATHER_MAX_PER_RUN:5}
+  # Collections that failed this many times go FAILED (until requeued).
+  max-attempts: ${WEATHER_MAX_ATTEMPTS:3}
+  # Route weather sampling: one sample per interval, capped per trip (the interval widens
+  # automatically for long routes so the whole recording stays covered).
+  sample-interval-minutes: ${WEATHER_SAMPLE_INTERVAL_MINUTES:60}
+  max-samples: ${WEATHER_MAX_SAMPLES:24}
+  # Live conditions are reused from cache for this long (map screen refreshes).
+  current-cache-ttl-minutes: ${WEATHER_CURRENT_CACHE_TTL_MINUTES:15}
+  # Cache key granularity in decimal places (2 = ~1.1km grid).
+  grid-precision: ${WEATHER_GRID_PRECISION:2}
+  # Cached observations older than this are pruned daily (stored trip samples are unaffected).
+  cache-retention-days: ${WEATHER_CACHE_RETENTION_DAYS:30}
+  cache-cleanup-cron: ${WEATHER_CACHE_CLEANUP_CRON:0 40 4 * * ?}
+  apple:
+    # Empty private-key -> dry-run mode: no WeatherKit calls, collections stay PENDING.
+    private-key: ${WEATHERKIT_PRIVATE_KEY:}
+    key-id: ${WEATHERKIT_KEY_ID:}
+    team-id: ${WEATHERKIT_TEAM_ID:}
+    # The Services ID registered for WeatherKit (e.g. im.trilo.weather).
+    service-id: ${WEATHERKIT_SERVICE_ID:}
+    base-url: ${WEATHERKIT_BASE_URL:https://weatherkit.apple.com}
+    # Language of WeatherKit's own text fields. conditionCode (what we actually return) is a
+    # locale-independent code the client maps itself, so this does not vary per user — and must
+    # not, since the observation cache is keyed by coordinate only.
+    language: ${WEATHERKIT_LANGUAGE:en-US}
+    # Only affects how WeatherKit bins day boundaries. We request currentWeather/forecastHourly,
+    # which are absolute instants, so UTC is the neutral choice; a fixed Asia/Seoul was wrong for
+    # every coordinate outside Korea.
+    timezone: ${WEATHERKIT_TIMEZONE:UTC}
+    token-ttl-minutes: ${WEATHERKIT_TOKEN_TTL_MINUTES:50}
+
+services:
+  trip-service-url: ${TRIP_SERVICE_URL:http://localhost:8082}
+
+logging:
+  level:
+    app.trilo: INFO
